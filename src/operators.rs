@@ -1,3 +1,5 @@
+use core::net;
+
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices
@@ -71,14 +73,35 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    let len=y.size();
+    let Some(&n)=y.shape().iter().last() else {
+        panic!("RMS Norm: the last dimension of the shape is missing.")
+    };
+    assert!(len==x.size(), "RMS Norm: input and output vectors must have the same length.");
+    assert!(n==w.size(), "RMS Norm: wrong weight vector length.");
+
+    let _y=unsafe { y.data_mut() };
+    let _x=x.data();
+    let _w=w.data();
+
+    for i in 0..len/n {
+        let start=i*n;
+        let end=start+n;
+
+        let sum_of_squares:f32=_x[start..end].iter().map(|&x|x*x).sum();
+        let norm_factor=(sum_of_squares/n as f32+epsilon).sqrt();
+
+        for j in 0..n {
+            _y[start+j]=_x[start+j]*_w[j]/norm_factor;
+        }
+    }
 }
 
 // y = silu(x) * y
 // hint: this is an element-wise operation
 pub fn swiglu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
     let len = y.size();
-    assert!(len == x.size(),"Input and output vectors must have the same length.");
+    assert!(len == x.size(),"Silu: input and output vectors must have the same length.");
 
     let _y = unsafe { y.data_mut() };
     let _x = x.data();
@@ -88,13 +111,37 @@ pub fn swiglu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
         let sliu_x = sigmoid_x*_x[i];
         _y[i] = sliu_x*_y[i];
     }
-    
 }
 
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+    // 检查矩阵尺寸
+    let m=a.shape()[0];
+    let n=b.shape()[0];
+    let k=a.shape()[1];
+    assert!(k==b.shape()[1],"Trans B: matrix dimensions do not match for multiplication.");
+    let _a=a.data();
+    let _b=b.data();
+    let _c=unsafe { c.data_mut() };
+
+    // 计算beta * C
+    for i in 0..m {
+        for j in 0..n {
+            _c[i*n+j]*=beta;
+        }
+    }
+
+    // 计算alpha * A @ B^T，并加上beta * C
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum=0 as f32;
+            for l in 0..k {
+                sum+=_a[i*k+l]*_b[j*k+l];
+            }
+            _c[i*n+j]+=alpha*sum;
+        }
+    }
 }
 
 // Dot product of two tensors (treated as vectors)
