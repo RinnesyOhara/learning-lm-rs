@@ -101,10 +101,33 @@ impl Llama<f32> {
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
-            todo!("self_attention(...),注意q还是三维，需要reshape");
-            todo!("down_proj matmul and add residual");
+            self_attention(
+                &mut hidden_states, 
+                &mut att_scores, 
+                q, 
+                full_k, 
+                full_v, 
+                self.n_kv_h, 
+                n_groups, 
+                seq_len, 
+                total_seq_len, 
+                self.dqkv, 
+            );
+            
+            // 乘上输出权重并且计算残差矩阵
+            OP::matmul_transb(&mut residual, 1.0, &hidden_states, &self.params.wo[layer], 1.0);
 
-            todo!("mlp(...)");
+            mlp(
+                &mut residual, 
+                &mut hidden_states, 
+                &mut  gate_buf, 
+                &mut up_buf, 
+                &self.params.w_up[layer], 
+                &self.params.w_down[layer], 
+                &self.params.w_gate[layer], 
+                &self.params.rms_ffn_w[layer], 
+                self.eps, 
+            );
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -205,12 +228,11 @@ fn self_attention(
                         + j * dqkv
                         + v_idx;
                     // 省略了与输出权重矩阵乘的步骤
-                    hidden_states_data[index_2] += sum;
+                    hidden_states_data[index_2] = sum;
                 }
             }
         }
     }
-
 }
 
 fn mlp(
