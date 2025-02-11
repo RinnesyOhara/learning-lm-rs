@@ -191,18 +191,20 @@ fn self_attention(
             for att_idx in 0..seq_len {
                 for v_idx in 0..dqkv {
                     let att_start = (i * n_groups * seq_len + j * seq_len + att_idx) * total_seq_len;
-                    let v_start = i * dqkv;
+                    let v_start = i * dqkv; // 只提取V中对应的头进行矩阵乘
                     let att_vec= &att_scores_data[att_start..att_start + total_seq_len];
                     let sum = att_vec
                         .iter()
                         .zip(v_data.iter().skip(v_start))
-                        .step_by(n_kv_h * dqkv)
+                        .step_by(n_kv_h * dqkv) // 注意一整行是n_kv_h * dqkv而不是dqkv
                         .map(|(x,y)| x * y)
                         .sum::<f32>();
+                    // 注意residual的坐标顺序与attn不一样
                     let index_2 = att_idx * n_kv_h * n_groups * dqkv
                         + i * n_groups * dqkv
                         + j * dqkv
                         + v_idx;
+                    // 省略了与输出权重矩阵乘的步骤
                     hidden_states_data[index_2] += sum;
                 }
             }
