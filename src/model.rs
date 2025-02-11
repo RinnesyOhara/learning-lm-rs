@@ -101,7 +101,7 @@ impl Llama<f32> {
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
-            todo!("self_attention(...)");
+            todo!("self_attention(...),注意q还是三维，需要reshape");
             todo!("down_proj matmul and add residual");
 
             todo!("mlp(...)");
@@ -153,7 +153,62 @@ fn self_attention(
     total_seq_len: usize,
     dqkv: usize,
 ) {
-    todo!("Implement self_attention");
+    let hidden_states_data = unsafe { hidden_states.data_mut() };
+    let q_data = q.data();
+    let k_data = k.data();
+    let v_data = v.data();
+
+    for i in 0..n_kv_h {
+        for j in 0..n_groups {
+            for q_idx in 0..seq_len {
+                for k_idx in 0..total_seq_len {
+                    let q_start = (q_idx * n_kv_h * n_groups + i * n_groups + j) * dqkv;
+                    let k_start = (k_idx * n_kv_h + i) * dqkv;
+                    let q_slice = &q_data[q_start..q_start + dqkv];
+                    let k_slice = &k_data[k_start..k_start + dqkv];
+                    let score = q_slice
+                        .iter()
+                        .zip(k_slice.iter())
+                        .map(|(x,y)| x * y)
+                        .sum::<f32>();
+                    let index_1 = i * n_groups * seq_len * total_seq_len
+                        + j * seq_len * total_seq_len
+                        + q_idx * total_seq_len
+                        + k_idx;
+                    unsafe {
+                        att_scores.data_mut()[index_1] = score / (dqkv as f32).sqrt();
+                    }
+                }
+            }
+        }
+    }
+
+    OP::masked_softmax(att_scores);
+
+    let att_scores_data = att_scores.data();
+    for i in 0..n_kv_h {
+        for j in 0..n_groups {
+            for att_idx in 0..seq_len {
+                for v_idx in 0..dqkv {
+                    let att_start = (i * n_groups * seq_len + j * seq_len + att_idx) * total_seq_len;
+                    let v_start = i * dqkv;
+                    let att_vec= &att_scores_data[att_start..att_start + total_seq_len];
+                    let sum = att_vec
+                        .iter()
+                        .zip(v_data.iter().skip(v_start))
+                        .step_by(n_kv_h * dqkv)
+                        .map(|(x,y)| x * y)
+                        .sum::<f32>();
+                    let index_2 = att_idx * n_kv_h * n_groups * dqkv
+                        + i * n_groups * dqkv
+                        + j * dqkv
+                        + v_idx;
+                    hidden_states_data[index_2] += sum;
+                }
+            }
+        }
+    }
+
 }
 
 fn mlp(
