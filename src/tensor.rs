@@ -53,7 +53,13 @@ impl<T: Copy + Clone + Default> Tensor<T> {
 
     pub fn slice(&self, start: usize, shape: &Vec<usize>) -> Self {
         let new_length: usize = shape.iter().product();
-        assert!(self.offset + start + new_length <= self.length);
+        assert!(self.offset + start + new_length <= self.length,
+            "invalid length: offset {}, start {}, slice_length {}, tensor_length {}",
+            self.offset,
+            start,
+            new_length,
+            self.length,
+        );
         Tensor {
             data: self.data.clone(),
             shape: shape.clone(),
@@ -79,7 +85,7 @@ impl Tensor<f32> {
     }
     #[allow(unused)]
     pub fn print(&self){
-        println!("shpae: {:?}, offset: {}, length: {}", self.shape, self.offset, self.length);
+        println!("shape: {:?}, offset: {}, length: {}", self.shape, self.offset, self.length);
         let dim = self.shape()[self.shape().len() - 1];
         let batch = self.length / dim;
         for i in 0..batch {

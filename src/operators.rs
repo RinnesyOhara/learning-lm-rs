@@ -1,5 +1,3 @@
-use core::net;
-
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices

@@ -74,6 +74,7 @@ impl Llama<f32> {
         OP::gather(&mut residual, input, &self.params.embedding_table);
 
         for layer in 0..self.n_layers {
+            // print!("layer: {}",layer);
             OP::rms_norm(
                 &mut hidden_states,
                 &residual,
@@ -120,7 +121,7 @@ impl Llama<f32> {
             mlp(
                 &mut residual, 
                 &mut hidden_states, 
-                &mut  gate_buf, 
+                &mut gate_buf, 
                 &mut up_buf, 
                 &self.params.w_up[layer], 
                 &self.params.w_down[layer], 
@@ -133,6 +134,7 @@ impl Llama<f32> {
         // No matter what seq_len, the output is always a 1D vector of length vocab,
         // which contains the probabilities for the next token.
         let mut logits = Tensor::<f32>::default(&vec![1, self.vocab]);
+        // print!("hidden_states & residual start:{}\n",(seq_len - 1) * self.d);
         let mut hidden_states = hidden_states.slice((seq_len - 1) * self.d, &vec![1, self.d]);
         let residual = residual.slice((seq_len - 1) * self.d, &vec![self.d]);
 
@@ -156,11 +158,37 @@ impl Llama<f32> {
         top_k: u32,
         temperature: f32,
     ) -> Vec<u32>{
-        let mut result = Vec::<u32>::new();
-        
-        todo!("实现文本生成");
-        
-        result
+        let mut result = token_ids.to_vec();
+        let result_len =result.len();
+        let mut kvcache = self.new_cache();
+        let mut curr_input = Tensor::new(result.clone(), &vec![result.len()]); // 可以删掉
+
+        for _ in 0..max_len {
+            let logits = self.forward(
+                &curr_input, 
+                &mut kvcache, 
+            );
+            let next_token = OP::random_sample(&logits, top_p, top_k, temperature);
+            result.push(next_token);
+            if next_token == self.eos_token_id {
+                break;
+            }
+            curr_input = Tensor::<u32>::new(vec![next_token], &vec![1]);
+        }
+
+        // for _ in 0..max_len {
+        //     let logits = self.forward(
+        //         &Tensor::<u32>::new(result.clone(), &vec![result.len()]), 
+        //         &mut kvcache, 
+        //     );
+        //     let next_token = OP::random_sample(&logits, top_p, top_k, temperature);
+        //     result.push(next_token);
+        //     if next_token == self.eos_token_id {
+        //         break;
+        //     }
+        // }
+
+        result[result_len..].to_vec()
     }
 }
 
@@ -214,12 +242,16 @@ fn self_attention(
             for att_idx in 0..seq_len {
                 for v_idx in 0..dqkv {
                     let att_start = (i * n_groups * seq_len + j * seq_len + att_idx) * total_seq_len;
-                    let v_start = i * dqkv; // 只提取V中对应的头进行矩阵乘
+                    let v_start = i * dqkv + v_idx; // 只提取V中对应的头进行矩阵乘
                     let att_vec= &att_scores_data[att_start..att_start + total_seq_len];
                     let sum = att_vec
                         .iter()
-                        .zip(v_data.iter().skip(v_start))
-                        .step_by(n_kv_h * dqkv) // 注意一整行是n_kv_h * dqkv而不是dqkv
+                        .zip(
+                            v_data
+                            .iter()
+                            .skip(v_start)
+                            .step_by(n_kv_h * dqkv)// 注意一整行是n_kv_h * dqkv而不是dqkv
+                        )
                         .map(|(x,y)| x * y)
                         .sum::<f32>();
                     // 注意residual的坐标顺序与attn不一样
@@ -246,11 +278,11 @@ fn mlp(
     rms_w: &Tensor<f32>,
     eps: f32,
 ) {
-    OP::rms_norm(hidden_states, &residual, rms_w, eps);
-    OP::matmul_transb(gate, 0., &hidden_states, w_gate, 1.0);
-    OP::matmul_transb(up, 0., &hidden_states, w_up, 1.0);
+    OP::rms_norm(hidden_states, &residual, &rms_w, eps);
+    OP::matmul_transb(gate, 0., &hidden_states, &w_gate, 1.0);
+    OP::matmul_transb(up, 0., &hidden_states, &w_up, 1.0);
     OP::swiglu(up, &gate);
-    OP::matmul_transb(residual, 1.0, &up, w_down, 1.0);
+    OP::matmul_transb(residual, 1.0, &up, &w_down, 1.0);
 }
 
 #[test]
